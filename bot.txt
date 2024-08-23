@@ -1,0 +1,216 @@
+const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
+const fs = require('fs');
+const axios = require('axios');
+const path = require('path');
+
+// Indsæt din bot-token her
+const TOKEN = 'DIN_DISCORD_TOKEN_HER';
+
+// Opret en ny instans af klienten med nødvendige intents
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent
+    ]
+});
+
+// Datafiler
+const DATA_FILE = path.join(__dirname, 'user_data.json');
+const KEYS_FILE = path.join(__dirname, 'keys.json');
+
+// Ekstern API URL (erstat med en faktisk API)
+const IP_INFO_API_URL = 'https://ipinfo.io/{IP}/json'; // Eksempel URL
+
+// Funktion til at sikre mapper og filer
+function ensureFiles() {
+    if (!fs.existsSync(DATA_FILE)) {
+        fs.writeFileSync(DATA_FILE, JSON.stringify([], null, 4), 'utf-8');
+        console.log('Oprettet: user_data.json');
+    }
+
+    if (!fs.existsSync(KEYS_FILE)) {
+        fs.writeFileSync(KEYS_FILE, JSON.stringify([], null, 4), 'utf-8');
+        console.log('Oprettet: keys.json');
+    }
+}
+
+// Kald funktionen for at sikre, at filerne eksisterer
+ensureFiles();
+
+client.once('ready', () => {
+    console.log('Botten er klar!');
+});
+
+// Funktioner til at håndtere JSON-filer
+function loadJson(filename) {
+    try {
+        if (fs.existsSync(filename)) {
+            return JSON.parse(fs.readFileSync(filename, 'utf-8'));
+        } else {
+            return [];
+        }
+    } catch (error) {
+        console.error(`Fejl ved læsning af JSON-fil: ${error}`);
+        return [];
+    }
+}
+
+function saveJson(filename, data) {
+    try {
+        fs.writeFileSync(filename, JSON.stringify(data, null, 4), 'utf-8');
+    } catch (error) {
+        console.error(`Fejl ved skrivning af JSON-fil: ${error}`);
+    }
+}
+
+// Funktioner til at håndtere data
+function findUserData(discordId) {
+    const data = loadJson(DATA_FILE);
+    return data.find(user => user.id === discordId) || null;
+}
+
+function updateUserData(userId, mention, ipAddress) {
+    const data = loadJson(DATA_FILE);
+    const user = findUserData(userId);
+    if (user) {
+        user.mention = mention;
+        user.ip = ipAddress;
+    } else {
+        data.push({ id: userId, mention: mention, ip: ipAddress });
+    }
+    saveJson(DATA_FILE, data);
+}
+
+function generateKey() {
+    return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+}
+
+function addKey(key, duration) {
+    const keys = loadJson(KEYS_FILE);
+    keys.push({ key, duration, redeemed: false });
+    saveJson(KEYS_FILE, keys);
+}
+
+function redeemKey(userId, key) {
+    const keys = loadJson(KEYS_FILE);
+    const keyData = keys.find(k => k.key === key && !k.redeemed);
+    if (keyData) {
+        keyData.redeemed = true;
+        keyData.userId = userId;
+        saveJson(KEYS_FILE, keys);
+        return true;
+    }
+    return false;
+}
+
+// Funktion til IP-opslag
+async function getIpInfo(ip) {
+    try {
+        const response = await axios.get(`${IP_INFO_API_URL}?token=YOUR_API_KEY_HERE`); // Sæt din API-nøgle her
+        const data = response.data;
+
+        return {
+            active: data.status === 'ok',
+            isVPN: data.org.includes('VPN') || data.org.includes('VPS'),
+            org: data.org,
+            city: data.city,
+            region: data.region,
+            country: data.country
+        };
+    } catch (error) {
+        console.error(`Fejl ved IP-opslag: ${error}`);
+        return {
+            active: false,
+            isVPN: false,
+            org: 'Ukendt',
+            city: 'Ukendt',
+            region: 'Ukendt',
+            country: 'Ukendt'
+        };
+    }
+}
+
+client.on('messageCreate', async (message) => {
+    if (message.content.startsWith('/lookup')) {  // Ændret fra /search til /lookup
+        const userData = findUserData(message.author.id);
+        if (userData) {
+            const ipInfo = await getIpInfo(userData.ip);
+            const embed = new EmbedBuilder()
+                .setColor('#2f3136')
+                .setAuthor({ name: 'Brugeroplysninger' })
+                .addFields(
+                    { name: 'Navn:', value: message.author.username },
+                    { name: 'IP-adresse:', value: userData.ip },
+                    { name: 'Aktiv:', value: ipInfo.active ? 'Ja' : 'Nej' },
+                    { name: 'VPN/VPS:', value: ipInfo.isVPN ? 'Ja' : 'Nej' },
+                    { name: 'Organisation:', value: ipInfo.org || 'Ukendt' },
+                    { name: 'By:', value: ipInfo.city || 'Ukendt' },
+                    { name: 'Region:', value: ipInfo.region || 'Ukendt' },
+                    { name: 'Land:', value: ipInfo.country || 'Ukendt' }
+                );
+            message.channel.send({ embeds: [embed] });
+        } else {
+            message.channel.send('Ingen IP-adresse fundet for dit Discord-ID.');
+        }
+    }
+
+    if (message.content.startsWith('/ipsearch')) {
+        const args = message.content.split(' ');
+        const ipAddress = args[1];
+        const userData = loadJson(DATA_FILE).find(user => user.ip === ipAddress);
+        if (userData) {
+            const ipInfo = await getIpInfo(ipAddress);
+            message.channel.send(`IP-adressen tilhører: ${userData.mention}\nAktiv: ${ipInfo.active ? 'Ja' : 'Nej'}\nVPN/VPS: ${ipInfo.isVPN ? 'Ja' : 'Nej'}`);
+        } else {
+            message.channel.send('Ingen data fundet for denne IP-adresse.');
+        }
+    }
+
+    if (message.content.startsWith('/commands')) {
+        const commandsList = "`/lookup` - Find brugeroplysninger for en Discord ID.\n" +  // Ændret her også
+            "`/ipsearch <IP-adresse>` - Søg IP-adresse for detaljerede oplysninger.\n" +
+            "`/commands` - List alle tilgængelige kommandoer.\n" +
+            "`/genkey` - Generer en ny adgangsnøgle (kun ejere).\n" +
+            "`/redeemkey <key>` - Indløs en adgangsnøgle.\n" +
+            "`/redeemedkeys` - List alle indløste nøgler og deres varigheder (kun ejere).\n" +
+            "`/removeaccess <@user>` - Fjern adgang fra en bruger (kun ejere).";
+        message.channel.send(commandsList);
+    }
+
+    if (message.content.startsWith('/genkey') && message.member.roles.cache.some(role => ['Founder', 'Co-Founder', 'Developer', 'Admin'].includes(role.name))) {
+        const key = generateKey();
+        addKey(key, 30); // 30 dage eksempelvis
+        message.channel.send(`Genereret nøgle: ${key}`);
+    }
+
+    if (message.content.startsWith('/redeemkey')) {
+        const args = message.content.split(' ');
+        const key = args[1];
+        if (redeemKey(message.author.id, key)) {
+            message.channel.send('Nøgle indløst succesfuldt!');
+        } else {
+            message.channel.send('Nøglen er ugyldig eller allerede indløst.');
+        }
+    }
+
+    if (message.content.startsWith('/redeemedkeys') && message.member.roles.cache.some(role => ['Founder', 'Co-Founder', 'Developer', 'Admin'].includes(role.name))) {
+        const keys = loadJson(KEYS_FILE).filter(k => k.redeemed);
+        const keysList = keys.map(k => `Nøgle: ${k.key}, Bruger: <@${k.userId}>, Varighed: ${k.duration} dage`).join('\n');
+        message.channel.send(`Indløste nøgler:\n${keysList}`);
+    }
+
+    if (message.content.startsWith('/removeaccess') && message.member.roles.cache.some(role => ['Founder', 'Co-Founder', 'Developer', 'Admin'].includes(role.name))) {
+        const mentionedUser = message.mentions.users.first();
+        if (mentionedUser) {
+            const data = loadJson(DATA_FILE);
+            const updatedData = data.filter(user => user.id !== mentionedUser.id);
+            saveJson(DATA_FILE, updatedData);
+            message.channel.send(`Adgang fjernet for: ${mentionedUser.username}`);
+        } else {
+            message.channel.send('Ingen bruger nævnt.');
+        }
+    }
+});
+
+client.login(TOKEN);
