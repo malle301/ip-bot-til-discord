@@ -3,10 +3,10 @@ const fs = require('fs');
 const axios = require('axios');
 const path = require('path');
 
-// Indsæt din bot-token her
-const TOKEN = 'DIN_DISCORD_TOKEN_HER';
+// Insert your bot token here
+const TOKEN = 'YOUR_BOT_TOKEN_HERE';
 
-// Opret en ny instans af klienten med nødvendige intents
+// Create a new instance of the client with necessary intents
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -15,34 +15,37 @@ const client = new Client({
     ]
 });
 
-// Datafiler
+// Data files
 const DATA_FILE = path.join(__dirname, 'user_data.json');
 const KEYS_FILE = path.join(__dirname, 'keys.json');
 
-// Ekstern API URL (erstat med en faktisk API)
-const IP_INFO_API_URL = 'https://ipinfo.io/{IP}/json'; // Eksempel URL
+// External API URL (replace with an actual API)
+const IP_INFO_API_URL = 'https://ipinfo.io/{IP}/json'; // Example URL
 
-// Funktion til at sikre mapper og filer
+// Function to ensure files and folders
 function ensureFiles() {
-    if (!fs.existsSync(DATA_FILE)) {
-        fs.writeFileSync(DATA_FILE, JSON.stringify([], null, 4), 'utf-8');
-        console.log('Oprettet: user_data.json');
-    }
-
-    if (!fs.existsSync(KEYS_FILE)) {
-        fs.writeFileSync(KEYS_FILE, JSON.stringify([], null, 4), 'utf-8');
-        console.log('Oprettet: keys.json');
+    try {
+        if (!fs.existsSync(DATA_FILE)) {
+            fs.writeFileSync(DATA_FILE, JSON.stringify([], null, 4), 'utf-8');
+            console.log('Created: user_data.json');
+        }
+        if (!fs.existsSync(KEYS_FILE)) {
+            fs.writeFileSync(KEYS_FILE, JSON.stringify([], null, 4), 'utf-8');
+            console.log('Created: keys.json');
+        }
+    } catch (error) {
+        console.error(`Error ensuring files: ${error}`);
     }
 }
 
-// Kald funktionen for at sikre, at filerne eksisterer
+// Call the function to ensure the files exist
 ensureFiles();
 
 client.once('ready', () => {
-    console.log('Botten er klar!');
+    console.log('Bot is ready!');
 });
 
-// Funktioner til at håndtere JSON-filer
+// Functions to handle JSON files
 function loadJson(filename) {
     try {
         if (fs.existsSync(filename)) {
@@ -51,7 +54,7 @@ function loadJson(filename) {
             return [];
         }
     } catch (error) {
-        console.error(`Fejl ved læsning af JSON-fil: ${error}`);
+        console.error(`Error reading JSON file: ${error}`);
         return [];
     }
 }
@@ -60,38 +63,50 @@ function saveJson(filename, data) {
     try {
         fs.writeFileSync(filename, JSON.stringify(data, null, 4), 'utf-8');
     } catch (error) {
-        console.error(`Fejl ved skrivning af JSON-fil: ${error}`);
+        console.error(`Error writing JSON file: ${error}`);
     }
 }
 
-// Funktioner til at håndtere data
-function findUserData(discordId) {
-    const data = loadJson(DATA_FILE);
-    return data.find(user => user.id === discordId) || null;
-}
+// Function to handle IP lookups
+async function getIpInfo(ip) {
+    try {
+        const response = await axios.get(`https://ipinfo.io/${ip}/json?token=YOUR_API_KEY_HERE`);
+        const data = response.data;
 
-function updateUserData(userId, mention, ipAddress) {
-    const data = loadJson(DATA_FILE);
-    const user = findUserData(userId);
-    if (user) {
-        user.mention = mention;
-        user.ip = ipAddress;
-    } else {
-        data.push({ id: userId, mention: mention, ip: ipAddress });
+        return {
+            active: data.status === 'ok',
+            isVPN: data.org.includes('VPN') || data.org.includes('VPS'),
+            org: data.org,
+            city: data.city,
+            region: data.region,
+            country: data.country
+        };
+    } catch (error) {
+        console.error(`Error fetching IP info: ${error}`);
+        return {
+            active: false,
+            isVPN: false,
+            org: 'Unknown',
+            city: 'Unknown',
+            region: 'Unknown',
+            country: 'Unknown'
+        };
     }
-    saveJson(DATA_FILE, data);
 }
 
+// Generate a random key
 function generateKey() {
     return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 }
 
+// Add a key to the keys file
 function addKey(key, duration) {
     const keys = loadJson(KEYS_FILE);
     keys.push({ key, duration, redeemed: false });
     saveJson(KEYS_FILE, keys);
 }
 
+// Redeem a key
 function redeemKey(userId, key) {
     const keys = loadJson(KEYS_FILE);
     const keyData = keys.find(k => k.key === key && !k.redeemed);
@@ -104,111 +119,126 @@ function redeemKey(userId, key) {
     return false;
 }
 
-// Funktion til IP-opslag
-async function getIpInfo(ip) {
-    try {
-        const response = await axios.get(`${IP_INFO_API_URL}?token=YOUR_API_KEY_HERE`); // Sæt din API-nøgle her
-        const data = response.data;
+// List redeemed keys
+function listRedeemedKeys() {
+    const keys = loadJson(KEYS_FILE).filter(k => k.redeemed);
+    return keys.map(k => `Key: ${k.key}, User: <@${k.userId}>, Duration: ${k.duration} days`).join('\n');
+}
 
-        return {
-            active: data.status === 'ok',
-            isVPN: data.org.includes('VPN') || data.org.includes('VPS'),
-            org: data.org,
-            city: data.city,
-            region: data.region,
-            country: data.country
-        };
-    } catch (error) {
-        console.error(`Fejl ved IP-opslag: ${error}`);
-        return {
-            active: false,
-            isVPN: false,
-            org: 'Ukendt',
-            city: 'Ukendt',
-            region: 'Ukendt',
-            country: 'Ukendt'
-        };
-    }
+// Remove access for a user
+function removeAccess(userId) {
+    const data = loadJson(DATA_FILE);
+    const updatedData = data.filter(user => user.id !== userId);
+    saveJson(DATA_FILE, updatedData);
 }
 
 client.on('messageCreate', async (message) => {
-    if (message.content.startsWith('/lookup')) {  // Ændret fra /search til /lookup
-        const userData = findUserData(message.author.id);
-        if (userData) {
-            const ipInfo = await getIpInfo(userData.ip);
-            const embed = new EmbedBuilder()
-                .setColor('#2f3136')
-                .setAuthor({ name: 'Brugeroplysninger' })
-                .addFields(
-                    { name: 'Navn:', value: message.author.username },
-                    { name: 'IP-adresse:', value: userData.ip },
-                    { name: 'Aktiv:', value: ipInfo.active ? 'Ja' : 'Nej' },
-                    { name: 'VPN/VPS:', value: ipInfo.isVPN ? 'Ja' : 'Nej' },
-                    { name: 'Organisation:', value: ipInfo.org || 'Ukendt' },
-                    { name: 'By:', value: ipInfo.city || 'Ukendt' },
-                    { name: 'Region:', value: ipInfo.region || 'Ukendt' },
-                    { name: 'Land:', value: ipInfo.country || 'Ukendt' }
-                );
-            message.channel.send({ embeds: [embed] });
+    if (message.content.startsWith('/lookup')) {
+        const args = message.content.split(' ');
+        const userId = args[1];  // Expecting userId as the second argument
+
+        if (userId) {
+            const data = loadJson(DATA_FILE);
+            const userData = data.find(user => user.id === userId);
+
+            if (userData) {
+                const ipInfo = await getIpInfo(userData.ip);
+                const embed = new EmbedBuilder()
+                    .setColor('#2f3136')
+                    .setAuthor({ name: 'User Information' })
+                    .addFields(
+                        { name: 'Username:', value: userData.mention || 'Unknown' },
+                        { name: 'IP Address:', value: userData.ip || 'Unknown' },
+                        { name: 'Active:', value: ipInfo.active ? 'Yes' : 'No' },
+                        { name: 'VPN/VPS:', value: ipInfo.isVPN ? 'Yes' : 'No' },
+                        { name: 'Organization:', value: ipInfo.org || 'Unknown' },
+                        { name: 'City:', value: ipInfo.city || 'Unknown' },
+                        { name: 'Region:', value: ipInfo.region || 'Unknown' },
+                        { name: 'Country:', value: ipInfo.country || 'Unknown' }
+                    );
+                message.channel.send({ embeds: [embed] });
+            } else {
+                message.channel.send('No data found for this user ID.');
+            }
         } else {
-            message.channel.send('Ingen IP-adresse fundet for dit Discord-ID.');
+            message.channel.send('Please provide a user ID.');
         }
     }
 
     if (message.content.startsWith('/ipsearch')) {
         const args = message.content.split(' ');
         const ipAddress = args[1];
-        const userData = loadJson(DATA_FILE).find(user => user.ip === ipAddress);
-        if (userData) {
+
+        if (ipAddress) {
             const ipInfo = await getIpInfo(ipAddress);
-            message.channel.send(`IP-adressen tilhører: ${userData.mention}\nAktiv: ${ipInfo.active ? 'Ja' : 'Nej'}\nVPN/VPS: ${ipInfo.isVPN ? 'Ja' : 'Nej'}`);
+            message.channel.send(`IP Address Info:
+                - Active: ${ipInfo.active ? 'Yes' : 'No'}
+                - VPN/VPS: ${ipInfo.isVPN ? 'Yes' : 'No'}
+                - Organization: ${ipInfo.org || 'Unknown'}
+                - City: ${ipInfo.city || 'Unknown'}
+                - Region: ${ipInfo.region || 'Unknown'}
+                - Country: ${ipInfo.country || 'Unknown'}`);
         } else {
-            message.channel.send('Ingen data fundet for denne IP-adresse.');
+            message.channel.send('Please provide an IP address.');
         }
     }
 
     if (message.content.startsWith('/commands')) {
-        const commandsList = "`/lookup` - Find brugeroplysninger for en Discord ID.\n" +  // Ændret her også
-            "`/ipsearch <IP-adresse>` - Søg IP-adresse for detaljerede oplysninger.\n" +
-            "`/commands` - List alle tilgængelige kommandoer.\n" +
-            "`/genkey` - Generer en ny adgangsnøgle (kun ejere).\n" +
-            "`/redeemkey <key>` - Indløs en adgangsnøgle.\n" +
-            "`/redeemedkeys` - List alle indløste nøgler og deres varigheder (kun ejere).\n" +
-            "`/removeaccess <@user>` - Fjern adgang fra en bruger (kun ejere).";
+        const commandsList = "`/lookup <userId>` - Find user information for a specific user ID.\n" +
+            "`/ipsearch <IP-address>` - Search for detailed information about an IP address.\n" +
+            "`/genkey` - Generate a new access key (only for owners).\n" +
+            "`/redeemkey <key>` - Redeem an access key.\n" +
+            "`/redeemedkeys` - List all redeemed keys and their durations (only for owners).\n" +
+            "`/removeaccess <@user>` - Remove access from a user (only for owners).\n" +
+            "`/commands` - List all available commands.";
         message.channel.send(commandsList);
     }
 
-    if (message.content.startsWith('/genkey') && message.member.roles.cache.some(role => ['Founder', 'Co-Founder', 'Developer', 'Admin'].includes(role.name))) {
-        const key = generateKey();
-        addKey(key, 30); // 30 dage eksempelvis
-        message.channel.send(`Genereret nøgle: ${key}`);
+    if (message.content.startsWith('/genkey')) {
+        if (message.member.roles.cache.some(role => ['Founder', 'Co-Founder', 'Developer', 'Admin'].includes(role.name))) {
+            const key = generateKey();
+            addKey(key, 30); // 30 days example
+            message.channel.send(`Generated key: ${key}`);
+        } else {
+            message.channel.send('You do not have permission to use this command.');
+        }
     }
 
     if (message.content.startsWith('/redeemkey')) {
         const args = message.content.split(' ');
         const key = args[1];
-        if (redeemKey(message.author.id, key)) {
-            message.channel.send('Nøgle indløst succesfuldt!');
+
+        if (key) {
+            if (redeemKey(message.author.id, key)) {
+                message.channel.send('Key redeemed successfully!');
+            } else {
+                message.channel.send('Invalid or already redeemed key.');
+            }
         } else {
-            message.channel.send('Nøglen er ugyldig eller allerede indløst.');
+            message.channel.send('Please provide a key to redeem.');
         }
     }
 
-    if (message.content.startsWith('/redeemedkeys') && message.member.roles.cache.some(role => ['Founder', 'Co-Founder', 'Developer', 'Admin'].includes(role.name))) {
-        const keys = loadJson(KEYS_FILE).filter(k => k.redeemed);
-        const keysList = keys.map(k => `Nøgle: ${k.key}, Bruger: <@${k.userId}>, Varighed: ${k.duration} dage`).join('\n');
-        message.channel.send(`Indløste nøgler:\n${keysList}`);
+    if (message.content.startsWith('/redeemedkeys')) {
+        if (message.member.roles.cache.some(role => ['Founder', 'Co-Founder', 'Developer', 'Admin'].includes(role.name))) {
+            const keysList = listRedeemedKeys();
+            message.channel.send(`Redeemed Keys:\n${keysList}`);
+        } else {
+            message.channel.send('You do not have permission to use this command.');
+        }
     }
 
-    if (message.content.startsWith('/removeaccess') && message.member.roles.cache.some(role => ['Founder', 'Co-Founder', 'Developer', 'Admin'].includes(role.name))) {
-        const mentionedUser = message.mentions.users.first();
-        if (mentionedUser) {
-            const data = loadJson(DATA_FILE);
-            const updatedData = data.filter(user => user.id !== mentionedUser.id);
-            saveJson(DATA_FILE, updatedData);
-            message.channel.send(`Adgang fjernet for: ${mentionedUser.username}`);
+    if (message.content.startsWith('/removeaccess')) {
+        if (message.member.roles.cache.some(role => ['Founder', 'Co-Founder', 'Developer', 'Admin'].includes(role.name))) {
+            const mentionedUser = message.mentions.users.first();
+            if (mentionedUser) {
+                removeAccess(mentionedUser.id);
+                message.channel.send(`Access removed for: ${mentionedUser.username}`);
+            } else {
+                message.channel.send('Please mention a user to remove access.');
+            }
         } else {
-            message.channel.send('Ingen bruger nævnt.');
+            message.channel.send('You do not have permission to use this command.');
         }
     }
 });
