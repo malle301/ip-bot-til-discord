@@ -3,111 +3,74 @@ const fs = require('fs');
 const axios = require('axios');
 const path = require('path');
 
-// Insert your bot token here
-const TOKEN = 'YOUR_BOT_TOKEN_HERE';
+// Replace these with your actual token and API key
+const TOKEN = 'YOUR_BOT_TOKEN';
+const IP_INFO_API_KEY = 'YOUR_API_KEY_HERE';
 
-// Create a new instance of the client with necessary intents
+// Create a new client instance
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMembers
     ]
 });
 
-// Data files
+// File paths
 const DATA_FILE = path.join(__dirname, 'user_data.json');
 const KEYS_FILE = path.join(__dirname, 'keys.json');
 
-// External API URL (replace with an actual API)
-const IP_INFO_API_URL = 'https://ipinfo.io/{IP}/json'; // Example URL
+// Utility function to load JSON data
+const loadJson = (filename) => {
+    if (fs.existsSync(filename)) {
+        return JSON.parse(fs.readFileSync(filename, 'utf-8'));
+    }
+    return [];
+};
 
-// Function to ensure files and folders
-function ensureFiles() {
-    try {
-        if (!fs.existsSync(DATA_FILE)) {
-            fs.writeFileSync(DATA_FILE, JSON.stringify([], null, 4), 'utf-8');
-            console.log('Created: user_data.json');
+// Utility function to save JSON data
+const saveJson = (filename, data) => {
+    fs.writeFileSync(filename, JSON.stringify(data, null, 4), 'utf-8');
+};
+
+// Ensure necessary files are present
+const ensureFiles = () => {
+    [DATA_FILE, KEYS_FILE].forEach(file => {
+        if (!fs.existsSync(file)) {
+            fs.writeFileSync(file, JSON.stringify([], null, 4), 'utf-8');
+            console.log(`Created: ${file}`);
         }
-        if (!fs.existsSync(KEYS_FILE)) {
-            fs.writeFileSync(KEYS_FILE, JSON.stringify([], null, 4), 'utf-8');
-            console.log('Created: keys.json');
-        }
-    } catch (error) {
-        console.error(`Error ensuring files: ${error}`);
-    }
-}
+    });
+};
 
-// Call the function to ensure the files exist
-ensureFiles();
-
-client.once('ready', () => {
-    console.log('Bot is ready!');
-});
-
-// Functions to handle JSON files
-function loadJson(filename) {
+// Fetch IP info from an external API
+const getIpInfo = async (ip) => {
     try {
-        if (fs.existsSync(filename)) {
-            return JSON.parse(fs.readFileSync(filename, 'utf-8'));
-        } else {
-            return [];
-        }
+        const response = await axios.get(`https://ipinfo.io/${ip}/json?token=${IP_INFO_API_KEY}`);
+        const { org, city, region, country } = response.data;
+        const isVPN = org.includes('VPN') || org.includes('VPS');
+        return { active: true, isVPN, org, city, region, country };
     } catch (error) {
-        console.error(`Error reading JSON file: ${error}`);
-        return [];
+        console.error(`Error fetching IP info: ${error.message}`);
+        return { active: false, isVPN: false, org: 'Unknown', city: 'Unknown', region: 'Unknown', country: 'Unknown' };
     }
-}
+};
 
-function saveJson(filename, data) {
-    try {
-        fs.writeFileSync(filename, JSON.stringify(data, null, 4), 'utf-8');
-    } catch (error) {
-        console.error(`Error writing JSON file: ${error}`);
-    }
-}
+// Generate a random access key
+const generateKey = () => {
+    return Math.random().toString(36).slice(2, 15) + Math.random().toString(36).slice(2, 15);
+};
 
-// Function to handle IP lookups
-async function getIpInfo(ip) {
-    try {
-        const response = await axios.get(`https://ipinfo.io/${ip}/json?token=YOUR_API_KEY_HERE`);
-        const data = response.data;
-
-        return {
-            active: data.status === 'ok',
-            isVPN: data.org.includes('VPN') || data.org.includes('VPS'),
-            org: data.org,
-            city: data.city,
-            region: data.region,
-            country: data.country
-        };
-    } catch (error) {
-        console.error(`Error fetching IP info: ${error}`);
-        return {
-            active: false,
-            isVPN: false,
-            org: 'Unknown',
-            city: 'Unknown',
-            region: 'Unknown',
-            country: 'Unknown'
-        };
-    }
-}
-
-// Generate a random key
-function generateKey() {
-    return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-}
-
-// Add a key to the keys file
-function addKey(key, duration) {
+// Add a new key to the keys file
+const addKey = (key, duration) => {
     const keys = loadJson(KEYS_FILE);
     keys.push({ key, duration, redeemed: false });
     saveJson(KEYS_FILE, keys);
-}
+};
 
-// Redeem a key
-function redeemKey(userId, key) {
+// Redeem an access key
+const redeemKey = (userId, key) => {
     const keys = loadJson(KEYS_FILE);
     const keyData = keys.find(k => k.key === key && !k.redeemed);
     if (keyData) {
@@ -117,58 +80,73 @@ function redeemKey(userId, key) {
         return true;
     }
     return false;
-}
+};
 
-// List redeemed keys
-function listRedeemedKeys() {
+// List all redeemed keys
+const listRedeemedKeys = () => {
     const keys = loadJson(KEYS_FILE).filter(k => k.redeemed);
     return keys.map(k => `Key: ${k.key}, User: <@${k.userId}>, Duration: ${k.duration} days`).join('\n');
-}
+};
 
 // Remove access for a user
-function removeAccess(userId) {
+const removeAccess = (userId) => {
     const data = loadJson(DATA_FILE);
     const updatedData = data.filter(user => user.id !== userId);
     saveJson(DATA_FILE, updatedData);
-}
+};
+
+// Send an embedded user info message
+const sendUserInfoEmbed = async (message, userId) => {
+    const data = loadJson(DATA_FILE);
+    const userData = data.find(user => user.id === userId);
+
+    if (userData) {
+        const member = message.guild.members.cache.get(userId);
+        const username = member ? member.user.username : 'Unknown';
+        const ipInfo = await getIpInfo(userData.ip);
+        const embed = new EmbedBuilder()
+            .setColor('#2f3136')
+            .setTitle('User Information')
+            .addFields(
+                { name: 'Username:', value: username, inline: true },
+                { name: 'Name:', value: userData.mention || 'Unknown', inline: true },
+                { name: 'IP Address:', value: userData.ip || 'Unknown', inline: true },
+                { name: 'VPN Status', value: ipInfo.isVPN ? '🛑 VPN Detected' : '✅ No VPN Detected', inline: true },
+                { name: 'Active Status', value: ipInfo.active ? '🟢 Active' : '🔴 Inactive', inline: true }
+            )
+            .setTimestamp()
+            .setFooter({ text: 'Only you can see this', iconURL: message.author.displayAvatarURL() });
+
+        await message.channel.send({ embeds: [embed] });
+    } else {
+        await message.channel.send('No data found for this user ID.');
+    }
+};
+
+// Initialize necessary files and start the bot
+ensureFiles();
+
+client.once('ready', () => {
+    console.log('Bot is ready!');
+});
 
 client.on('messageCreate', async (message) => {
-    if (message.content.startsWith('/lookup')) {
-        const args = message.content.split(' ');
-        const userId = args[1];  // Expecting userId as the second argument
+    if (message.author.bot) return;
 
+    const args = message.content.split(' ');
+    const command = args[0];
+
+    if (command === '/lookup') {
+        const userId = args[1];
         if (userId) {
-            const data = loadJson(DATA_FILE);
-            const userData = data.find(user => user.id === userId);
-
-            if (userData) {
-                const ipInfo = await getIpInfo(userData.ip);
-                const embed = new EmbedBuilder()
-                    .setColor('#2f3136')
-                    .setAuthor({ name: 'User Information' })
-                    .addFields(
-                        { name: 'Username:', value: userData.mention || 'Unknown' },
-                        { name: 'IP Address:', value: userData.ip || 'Unknown' },
-                        { name: 'Active:', value: ipInfo.active ? 'Yes' : 'No' },
-                        { name: 'VPN/VPS:', value: ipInfo.isVPN ? 'Yes' : 'No' },
-                        { name: 'Organization:', value: ipInfo.org || 'Unknown' },
-                        { name: 'City:', value: ipInfo.city || 'Unknown' },
-                        { name: 'Region:', value: ipInfo.region || 'Unknown' },
-                        { name: 'Country:', value: ipInfo.country || 'Unknown' }
-                    );
-                message.channel.send({ embeds: [embed] });
-            } else {
-                message.channel.send('No data found for this user ID.');
-            }
+            await sendUserInfoEmbed(message, userId);
         } else {
             message.channel.send('Please provide a user ID.');
         }
     }
 
-    if (message.content.startsWith('/ipsearch')) {
-        const args = message.content.split(' ');
+    if (command === '/ipsearch') {
         const ipAddress = args[1];
-
         if (ipAddress) {
             const ipInfo = await getIpInfo(ipAddress);
             message.channel.send(`IP Address Info:
@@ -183,31 +161,31 @@ client.on('messageCreate', async (message) => {
         }
     }
 
-    if (message.content.startsWith('/commands')) {
-        const commandsList = "`/lookup <userId>` - Find user information for a specific user ID.\n" +
-            "`/ipsearch <IP-address>` - Search for detailed information about an IP address.\n" +
-            "`/genkey` - Generate a new access key (only for owners).\n" +
-            "`/redeemkey <key>` - Redeem an access key.\n" +
-            "`/redeemedkeys` - List all redeemed keys and their durations (only for owners).\n" +
-            "`/removeaccess <@user>` - Remove access from a user (only for owners).\n" +
-            "`/commands` - List all available commands.";
+    if (command === '/commands') {
+        const commandsList = [
+            "/lookup <userId> - Find user information for a specific user ID.",
+            "/ipsearch <IP-address> - Search for detailed information about an IP address.",
+            "/genkey - Generate a new access key (only for owners).",
+            "/redeemkey <key> - Redeem an access key.",
+            "/redeemedkeys - List all redeemed keys and their durations (only for owners).",
+            "/removeaccess <@user> - Remove access from a user (only for owners).",
+            "/commands - List all available commands."
+        ].join('\n');
         message.channel.send(commandsList);
     }
 
-    if (message.content.startsWith('/genkey')) {
+    if (command === '/genkey') {
         if (message.member.roles.cache.some(role => ['Founder', 'Co-Founder', 'Developer', 'Admin'].includes(role.name))) {
             const key = generateKey();
-            addKey(key, 30); // 30 days example
+            addKey(key, 30);
             message.channel.send(`Generated key: ${key}`);
         } else {
             message.channel.send('You do not have permission to use this command.');
         }
     }
 
-    if (message.content.startsWith('/redeemkey')) {
-        const args = message.content.split(' ');
+    if (command === '/redeemkey') {
         const key = args[1];
-
         if (key) {
             if (redeemKey(message.author.id, key)) {
                 message.channel.send('Key redeemed successfully!');
@@ -219,7 +197,7 @@ client.on('messageCreate', async (message) => {
         }
     }
 
-    if (message.content.startsWith('/redeemedkeys')) {
+    if (command === '/redeemedkeys') {
         if (message.member.roles.cache.some(role => ['Founder', 'Co-Founder', 'Developer', 'Admin'].includes(role.name))) {
             const keysList = listRedeemedKeys();
             message.channel.send(`Redeemed Keys:\n${keysList}`);
@@ -228,7 +206,7 @@ client.on('messageCreate', async (message) => {
         }
     }
 
-    if (message.content.startsWith('/removeaccess')) {
+    if (command === '/removeaccess') {
         if (message.member.roles.cache.some(role => ['Founder', 'Co-Founder', 'Developer', 'Admin'].includes(role.name))) {
             const mentionedUser = message.mentions.users.first();
             if (mentionedUser) {
